@@ -68,5 +68,5 @@ class UserEmpresaViewSet(viewsets.ModelViewSet):
 
         # Continuar con la creación normal del UserEmpresa
         # El serializer necesita el 'request' para obtener la empresa del token
-        serializer.save(context={'request': self.request})
+        serializer.save()
 
