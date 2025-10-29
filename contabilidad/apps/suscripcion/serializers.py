@@ -19,7 +19,7 @@ class PlanSeralizer(serializers.ModelSerializer):
 class CaracteristicaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Caracteristica
-        fields = ['cant_empresas', 'cant_colab', 'funcionalidad']
+        fields = ['cant_empresas', 'cant_colab', 'codigofuncionalidad' , 'cant_consultas_ia']
 
 class TipoPlanSerializer(serializers.ModelSerializer):
     plan = PlanSeralizer(read_only=True)

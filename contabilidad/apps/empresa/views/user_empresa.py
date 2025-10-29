@@ -52,19 +52,19 @@ class UserEmpresaViewSet(viewsets.ModelViewSet):
             # Contar colaboradores actuales (excluyendo al admin/creador si es necesario,
             # pero usualmente el límite es sobre el total de usuarios en la empresa)
             empresa_id = self.request.auth.get('empresa')
-            colaboradores_actuales = UserEmpresa.objects.filter(empresa_id=empresa_id).count()
+            #colaboradores_actuales = UserEmpresa.objects.filter(empresa_id=empresa_id).count()
 
             # Comparar con el límite inicial del plan (almacenado en suscripcion)
             # O podrías comparar directamente con suscripcion.colab_disponible si lo decrementas
-            limite_colabs = suscripcion.plan.caracteristica.cant_colab
-            if limite_colabs is not None and colaboradores_actuales >= limite_colabs:
-                 raise PermissionDenied("Has alcanzado el límite de colaboradores para tu plan.")
+            #limite_colabs = suscripcion.plan.caracteristica.cant_colab
+            #if colaboradores_actuales + 1 > limite_colabs:
+            #     raise PermissionDenied("Has alcanzado el límite de colaboradores para tu plan.")
 
             # Decrementar contador si usas esa lógica (opcional si comparas con el total)
-            # if suscripcion.colab_disponible <= 0:
-            #     raise PermissionDenied("Has alcanzado el límite de colaboradores para tu plan.")
-            # suscripcion.colab_disponible -= 1
-            # suscripcion.save()
+            if suscripcion.colab_disponible <= 0:
+                raise PermissionDenied("Has alcanzado el límite de colaboradores para tu plan.")
+            suscripcion.colab_disponible -= 1
+            suscripcion.save()
 
         # Continuar con la creación normal del UserEmpresa
         # El serializer necesita el 'request' para obtener la empresa del token
