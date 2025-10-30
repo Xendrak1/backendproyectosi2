@@ -33,7 +33,7 @@ class SuscripcionDetailSerializer(serializers.ModelSerializer):
     plan = TipoPlanSerializer(read_only=True)
     class Meta:
         model = Suscripcion
-        fields = ["id", "fecha_inicio", "fecha_fin", "codigo", "dia_restante", "empresa_disponible", "colab_disponible", "estado", "plan", "user"]
+        fields = ["id", "fecha_inicio", "fecha_fin", "codigo", "dia_restante", "empresa_disponible", "colab_disponible", "consultas_ia_restantes", "estado", "plan", "user"]
 
 class PaymentRequestSerializer(serializers.Serializer):
     tipo_plan_id = serializers.IntegerField() # Cambiado a IntegerField para coincidir con BigAutoField
