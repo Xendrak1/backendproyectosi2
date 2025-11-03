@@ -28,6 +28,7 @@ class Caracteristica(models.Model):
     cant_colab = models.IntegerField(null=True, blank=True)
     funcionalidad = models.TextField()
     codigo = models.TextField(unique=True)
+    cant_consultas_ia = models.IntegerField(null=True, blank=True) #esto debe aparecer el el commit a mi sprint_2
 
     class Meta:
         db_table = "caracteristica"
@@ -56,6 +57,7 @@ class Suscripcion(models.Model):
     dia_restante = models.IntegerField(default=0)
     empresa_disponible = models.IntegerField(default=0, null=True, blank=True)
     colab_disponible = models.IntegerField(default=0, null=True, blank=True)
+    consultas_ia_restantes = models.IntegerField(null=True, blank=True, default=None) #esto debe aparecer el el commit a mi sprint_2
     estado = models.ForeignKey("Estado", related_name='suscripciones', default=3, on_delete=models.SET_DEFAULT)
     plan = models.ForeignKey("TipoPlan", related_name='suscripciones',on_delete=models.CASCADE)
     user = models.ForeignKey(User, related_name='suscripciones',on_delete=models.CASCADE)

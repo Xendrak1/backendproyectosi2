@@ -1,7 +1,7 @@
 from ...suscripcion.models import Estado, Plan, Caracteristica, TipoPlan
 
 def run():
-    # 1️⃣ Cargar estados
+    # Cargar estados
     estados = [
         {"nombre": "pendiente"},
         {"nombre": "activo"},
@@ -10,7 +10,7 @@ def run():
     for e in estados:
         Estado.objects.get_or_create(nombre=e["nombre"])
 
-    # 2️⃣ Cargar planes
+    # Cargar planes
     plan_basic, _ = Plan.objects.get_or_create(
         codigo="BASIC",
         defaults={"nombre": "Básico", "descripcion": "Plan inicial"}
@@ -24,21 +24,21 @@ def run():
         defaults={"nombre": "Empresarial", "descripcion": "Plan para empresas"}
     )
 
-    # 3️⃣ Cargar características
+    #  Cargar características
     car_basic, _ = Caracteristica.objects.get_or_create(
         codigo="CAR_BASIC",
-        defaults={"cant_empresas": 1, "cant_colab": 1, "funcionalidad": "generales"}
+        defaults={"cant_empresas": 1, "cant_colab": 1, "funcionalidad": "basicas", "cant_consultas_ia": None}
     )
     car_pro, _ = Caracteristica.objects.get_or_create(
         codigo="CAR_PREMIUM",
-        defaults={"cant_empresas": 5, "cant_colab": 10, "funcionalidad": "generales"}
+        defaults={"cant_empresas": 5, "cant_colab": 10, "funcionalidad": "generales, acceso a IA", "cant_consultas_ia": 3}
     )
     car_emp, _ = Caracteristica.objects.get_or_create(
         codigo="CAR_BUSINESS",
-        defaults={"cant_empresas": None, "cant_colab": None, "funcionalidad": "completa"}
+        defaults={"cant_empresas": None, "cant_colab": None, "funcionalidad": "completa, acceso a IA", "cant_consultas_ia": 10}
     )
 
-    # 4️⃣ Cargar tipos de plan usando objetos
+    # Cargar tipos de plan usando objetos
     tipos_de_plan = [
         {"duracion_mes": 1, "precio": 0.0, "codigo": "gr00", "plan": plan_basic, "caracteristica": car_basic},
         {"duracion_mes": 1, "precio": 0.1, "codigo": "pro06", "plan": plan_pro, "caracteristica": car_pro},

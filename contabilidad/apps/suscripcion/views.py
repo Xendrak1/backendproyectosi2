@@ -61,7 +61,7 @@ class SuscripcionViewSet(viewsets.GenericViewSet):
         
         user = request.user
         tipo_plan = serializer.validated_data['tipo_plan']
-        
+        caracteristica = tipo_plan.caracteristica
         # Lógica de cálculo de fechas (Común a ambos flujos)
         if tipo_plan.duracion_mes > 0:
             fecha_fin_deuda = date.today() + timedelta(days=tipo_plan.duracion_mes * 30)
@@ -69,7 +69,11 @@ class SuscripcionViewSet(viewsets.GenericViewSet):
         else:
             fecha_fin_deuda = date.today() + timedelta(days=36500) 
             dias_restantes = 36500
-        
+        #iniciar valores de los contadores
+        empresa_inicial = caracteristica.cant_empresas
+        colab_inicial = caracteristica.cant_colab
+        ia_inicial = caracteristica.cant_consultas_ia
+
         #FLUJO 1: PLAN GRATUITO (Activar directamente)
         if tipo_plan.precio == 0:
             print("Procesando plan gratuito...")
@@ -77,7 +81,7 @@ class SuscripcionViewSet(viewsets.GenericViewSet):
             try:
                 with transaction.atomic():
                     estado_activo = Estado.objects.get(nombre='activo')
-                    estado_nulo = Estado.objects.get(nombre='nulo')
+                    #estado_nulo = Estado.objects.get(nombre='nulo')
                     
                     # Desactivar suscripciones anteriores
                     #Suscripcion.objects.filter(user=user, estado=estado_activo).update(estado=estado_nulo)
@@ -90,8 +94,9 @@ class SuscripcionViewSet(viewsets.GenericViewSet):
                         fecha_fin=fecha_fin_deuda,
                         codigo=f"SUB-GRATIS-{str(user.id)}", 
                         dia_restante=dias_restantes,
-                        empresa_disponible=tipo_plan.caracteristica.cant_empresas or 1,
-                        colab_disponible=tipo_plan.caracteristica.cant_colab or 1,
+                        empresa_disponible=empresa_inicial,
+                        colab_disponible=colab_inicial,
+                        consultas_ia_restantes=ia_inicial
                     )
                     
                     return Response(SubscriptionSuccessSerializer(suscripcion).data, status=status.HTTP_201_CREATED)
@@ -166,8 +171,9 @@ class SuscripcionViewSet(viewsets.GenericViewSet):
                         fecha_fin=fecha_fin_deuda,
                         codigo=identificador_deuda, 
                         dia_restante=dias_restantes,
-                        empresa_disponible=tipo_plan.caracteristica.cant_empresas or 999,
-                        colab_disponible=tipo_plan.caracteristica.cant_colab or 999,
+                        empresa_disponible=empresa_inicial,
+                        colab_disponible=colab_inicial,
+                        consultas_ia_restantes=ia_inicial
                     )
                 
                 return Response({
@@ -191,6 +197,7 @@ class PagoExitosoCallback(APIView):
     # Permite acceso sin autenticación (ya que Libélula te llama directamente)
     permission_classes = [AllowAny] 
     
+    @transaction.atomic
     def get(self, request):
         """
         Servicio PAGO EXITOSO (Callback de Libélula).
@@ -210,10 +217,29 @@ class PagoExitosoCallback(APIView):
                 return Response({"detail": "Suscripción ya estaba activa."}, status=status.HTTP_200_OK)
             
             # 3. Activar Suscripción
+            tipo_plan = suscripcion.plan
+            caracteristica = tipo_plan.caracteristica
+            fecha_inicio_real = date.today() # Usar la fecha actual como inicio real
+            if tipo_plan.duracion_mes > 0:
+                fecha_fin_real = fecha_inicio_real + timedelta(days=tipo_plan.duracion_mes * 30)
+                dias_restantes_real = (fecha_fin_real - fecha_inicio_real).days
+            else: # Plan "ilimitado" en tiempo
+                fecha_fin_real = fecha_inicio_real + timedelta(days=36500)
+                dias_restantes_real = 36500
+
+            suscripcion.estado = estado_activo
+            suscripcion.fecha_inicio = fecha_inicio_real # Actualizar fecha inicio
+            suscripcion.fecha_fin = fecha_fin_real     # Actualizar fecha fin
+            suscripcion.dia_restante = dias_restantes_real # Actualizar días
+            # --- CONFIRMAR/ACTUALIZAR CONTADORES ---
+            suscripcion.empresa_disponible = caracteristica.cant_empresas
+            suscripcion.colab_disponible = caracteristica.cant_colab
+            suscripcion.consultas_ia_restantes = caracteristica.cant_consultas_ia
+            # --------------------------------------
+
             estado_pagado = 'pagado'
             suscripcion.estado = estado_activo 
             suscripcion.save()
-            
             # 4. Registrar el Pago
             metodo_pago = 'tarjeta' # Valor por defecto
             

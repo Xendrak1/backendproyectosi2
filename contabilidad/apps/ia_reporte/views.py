@@ -4,6 +4,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from rest_framework.exceptions import PermissionDenied
+from contabilidad.apps.suscripcion.models import Suscripcion, Estado
 
 from .services import IAReporteService
 from .serializers import (
@@ -17,7 +19,7 @@ from contabilidad.apps.empresa.models.user_empresa import UserEmpresa
 @api_view(['POST'])
 
 @permission_classes([IsAuthenticated])
-
+@transaction.atomic
 def generar_reporte_ia(request):
     """
     Endpoint para generar reportes usando IA basado en texto natural.
@@ -37,7 +39,28 @@ def generar_reporte_ia(request):
         
         texto_solicitud = serializer.validated_data['texto_solicitud']
         usuario = request.user
-        
+
+        # --- VERIFICACIÓN Y DECREMENTO DE LÍMITE IA ---
+        try:
+            estado_activo = Estado.objects.get(nombre='activo')
+            suscripcion = Suscripcion.objects.select_for_update().get(user=usuario, estado=estado_activo) # select_for_update para bloqueo
+        except (Estado.DoesNotExist, Suscripcion.DoesNotExist):
+            raise PermissionDenied("No tienes una suscripción activa.")
+
+        consultas_restantes = suscripcion.consultas_ia_restantes
+
+        if consultas_restantes == 0: # Si es 0, el límite se alcanzó
+             return Response({
+                'success': False,
+                'error': 'Has alcanzado el límite de consultas IA para tu plan.'
+            }, status=status.HTTP_403_FORBIDDEN) # 403 Forbidden
+        elif consultas_restantes is None: # Si es None, es ilimitado
+            pass # No hacer nada, continuar
+        else: # Si es > 0, decrementar
+            suscripcion.consultas_ia_restantes -= 1
+            suscripcion.save(update_fields=['consultas_ia_restantes']) # Guardar solo este campo
+        # --- FIN VERIFICACIÓN IA ---
+
         # Obtener la empresa del usuario
         try:
             empresa_id = request.auth.get('empresa') 
