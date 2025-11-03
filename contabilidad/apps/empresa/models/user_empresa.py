@@ -10,6 +10,12 @@ class UserEmpresa(models.Model):
     custom = models.ForeignKey(Custom, on_delete=models.SET_NULL, null=True, blank=True)
     texto_tipo = models.CharField(max_length=50, null=True, blank=True)
     texto_tamano = models.CharField(max_length=50, null=True, blank=True)
+    ESTADO_CHOICES = [
+        ('PENDIENTE', 'PENDIENTE'),
+        ('ACEPTADA', 'ACEPTADA'),
+        ('RECHAZADA', 'RECHAZADA'),
+    ]
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='PENDIENTE')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)  
     class Meta:

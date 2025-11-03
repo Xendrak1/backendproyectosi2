@@ -1,0 +1,13 @@
+{% with pad="indent-"|add:level|stringformat:"s" %}
+<tr>
+  <td class="{{ pad }}">{{ node.codigo }} - {{ node.nombre }}</td>
+  <td class="text-right">{{ node.total_debe }}</td>
+  <td class="text-right">{{ node.total_haber }}</td>
+  <td class="text-right">{{ node.saldo }}</td>
+</tr>
+{% endwith %}
+{% if node.hijos %}
+  {% for h in node.hijos %}
+    {% include "reporte/partials/balance_node.html" with node=h level=level|add:1 %}
+  {% endfor %}
+{% endif %}

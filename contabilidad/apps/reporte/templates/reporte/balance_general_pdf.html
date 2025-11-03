@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Balance General</title>
+  <style>
+    body { font-family: DejaVu Sans, Arial, sans-serif; font-size: 12px; }
+    h1 { font-size: 18px; margin-bottom: 4px; }
+    .meta { color: #555; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; padding: 6px 8px; }
+    th { background: #f0f0f0; }
+    .text-right { text-align: right; }
+    .indent-0 { padding-left: 4px; }
+    .indent-1 { padding-left: 24px; }
+    .indent-2 { padding-left: 44px; }
+    .indent-3 { padding-left: 64px; }
+    .indent-4 { padding-left: 84px; }
+  </style>
+</head>
+<body>
+  <h1>Balance General</h1>
+  <div class="meta">Rango: {{ fecha_inicio }} a {{ fecha_fin }}</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Cuenta</th>
+        <th class="text-right">Total Debe</th>
+        <th class="text-right">Total Haber</th>
+        <th class="text-right">Saldo</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for root in data %}
+        {% include "reporte/partials/balance_node.html" with node=root level=0 %}
+      {% empty %}
+        <tr><td colspan="4">Sin datos</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th>TOTALES</th>
+        <th class="text-right">{{ totales.debe }}</th>
+        <th class="text-right">{{ totales.haber }}</th>
+        <th class="text-right">{{ totales.saldo }}</th>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>

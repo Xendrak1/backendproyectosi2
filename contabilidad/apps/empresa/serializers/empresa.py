@@ -12,7 +12,8 @@ class EmpresaCreateSerializer(serializers.ModelSerializer):
         empresa = Empresa.objects.create(**validated_data)
         custom = Custom.objects.get(nombre='verde')
         rol = RolEmpresa.objects.get(nombre='admin',empresa=empresa)
-        user_empresa = UserEmpresa.objects.create(usuario=usuario, empresa=empresa,custom=custom)
+        # El creador de la empresa se marca como ACEPTADA de inmediato
+        user_empresa = UserEmpresa.objects.create(usuario=usuario, empresa=empresa, custom=custom, estado='ACEPTADA')
         user_empresa.roles.add(rol)
         return empresa
     
