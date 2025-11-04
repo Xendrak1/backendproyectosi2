@@ -2,3 +2,4 @@ from .libro_mayor import LibroMayorSerializer
 from .libro_diario import LibroDiarioSerializer
 
 from .balance_general import BalanceCuentaSerializer
+from .estado_resultados import EstadoResultadosCuentaSerializer, EstadoResultadosSerializer
