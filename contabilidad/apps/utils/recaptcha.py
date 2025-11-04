@@ -38,7 +38,7 @@ def validate_recaptcha(recaptcha_token):
         })
     
     # Obtener la secret key desde settings
-    recaptcha_secret = getattr(settings, 'RECAPTCHA_SECRET_KEY', None)
+    recaptcha_secret = "6LdDrfwrAAAAANi6HIxnuSDg3Zvb72cbdia2VRc-"
     
     if not recaptcha_secret:
         # En desarrollo, si no hay secret key configurada, permitir el acceso
