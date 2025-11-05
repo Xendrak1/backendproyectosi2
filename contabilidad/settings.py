@@ -146,7 +146,7 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 #configurar para la base datos
-'''
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -157,7 +157,7 @@ DATABASES = {
         'PORT': config('DB_PORT'),
     }
 }
-'''
+
 
 LIBELULA_APPKEY = config('LIBELULA_APPKEY', default='11bb10ce-68ba-4af1-8eb7-4e6624fed729')
 LIBELULA_URL = config( 'LIBELULA_URL', default='https://api.libelula.bo')
