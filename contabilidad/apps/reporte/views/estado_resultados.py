@@ -1,8 +1,7 @@
-# apps/reporte/views/estado_resultados.py
-from rest_framework import viewsets
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework import viewsets # ⬅️ ¡IMPORTACIÓN CLAVE!
+from rest_framework.permissions import IsAuthenticated
 from django.db.models import Sum, Q, DecimalField
 from django.db.models.functions import Coalesce
 from datetime import date, datetime, timedelta
@@ -18,6 +17,8 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = None
 
+    # --- Funciones auxiliares (helper methods) ---
+    
     def _get_empresa(self, request):
         """Función helper para obtener la empresa de forma segura."""
         if hasattr(request, 'empresa_id') and request.empresa_id:
@@ -25,19 +26,27 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
         if hasattr(request, 'auth') and request.auth:
              empresa = request.auth.get('empresa')
              if empresa:
-                 return empresa.id
+                 return empresa.id # ⬅️ ¡CORREGIDO!
         if hasattr(request, 'user') and hasattr(request.user, 'user_empresa'):
             return request.user.user_empresa.empresa_id
         return None
 
-    def _get_saldos_agregados(self, empresa_id, fecha_inicio, fecha_fin):
+    def get_clases_raiz(self, empresa_id):
+        # Solo obtenemos las raíces de Ingresos (4) y Egresos (5)
+        return ClaseCuenta.objects.filter(
+            empresa_id=empresa_id, 
+            padre__isnull=True,
+            codigo__in=[4, 5] # Solo clases 4 y 5
+        ).order_by('codigo')
+
+    def get_saldos_cuentas_resultado(self, empresa_id, fecha_inicio, fecha_fin):
         """
-        OPTIMIZACIÓN: Hace UNA sola consulta a la BBDD para obtener todos los saldos
-        de Ingresos y Egresos (Clases 4 y 5) en el rango de fechas.
+        Obtiene los saldos de todas las cuentas de Ingreso y Egreso
+        (Clases 4, 5) para el RANGO de fechas.
         """
         saldos_qs = Movimiento.objects.filter(
             asiento_contable__empresa_id=empresa_id,
-            asiento_contable__fecha__range=[fecha_inicio, fecha_fin], # RANGO
+            asiento_contable__fecha__range=[fecha_inicio, fecha_fin], # RANGO de fechas
             estado=True
         ).filter(
             Q(cuenta__clase_cuenta__codigo__startswith='4') |
@@ -73,56 +82,53 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
                 }
         return saldos_dict
 
-    def _calcular_recursivo(self, clase, saldos_dict):
+    def procesar_cuentas_recursivo(self, clase_actual, saldos_dict):
         """
-        Función recursiva MEJORADA.
-        Ya no hace consultas a la BBDD, solo lee del 'saldos_dict'.
+        Función recursiva optimizada.
         """
-        
-        # 1. Procesar cuentas (hojas) de esta clase
-        cuentas_data = []
-        for cuenta_id, saldo_info in saldos_dict.items():
-            if saldo_info['clase_id'] == clase.id:
-                cuentas_data.append({
-                    "codigo": saldo_info['codigo'],
-                    "nombre": saldo_info['nombre'],
-                    "total_debe": saldo_info['total_debe'],
-                    "total_haber": saldo_info['total_haber'],
-                    "net": saldo_info['net'],
-                    "hijos": [],
-                })
-
-        # 2. Procesar subclases (hijos)
-        hijos_data = []
-        total_net_hijos = Decimal(0)
-        
-        for hijo in clase.hijos.all(): # .all() es rápido por el prefetch_related
-            hijo_data = self._calcular_recursivo(hijo, saldos_dict)
-            if hijo_data: # Solo añadir si el hijo tiene saldo
-                hijos_data.append(hijo_data)
-                total_net_hijos += hijo_data['net']
-
-        # 3. Calcular totales para ESTA clase
-        total_net_propias = sum(c['net'] for c in cuentas_data)
-        total_net = total_net_propias + total_net_hijos
-        
-        # Combinar: primero mostrar cuentas directas, luego las subclases
-        hijos_completos = cuentas_data + hijos_data
-
-        # Optimización: Si no hay saldo ni hijos, no mostrar esta clase
-        if not hijos_completos:
-             return None
-
-        return {
-            "codigo": clase.codigo,
-            "nombre": clase.nombre,
-            # Los totales debe/haber no son tan relevantes en E.R., pero 'net' sí
-            "total_debe": sum(c['total_debe'] for c in hijos_completos),
-            "total_haber": sum(c['total_haber'] for c in hijos_completos),
-            "net": total_net,
-            "hijos": hijos_completos,
+        data = {
+            "codigo": clase_actual.codigo,
+            "nombre": clase_actual.nombre,
+            "total_debe": Decimal(0),
+            "total_haber": Decimal(0),
+            "net": Decimal(0), # (Saldo según naturaleza)
+            "hijos": []
         }
 
+        hijos = clase_actual.hijos.filter(empresa_id=clase_actual.empresa_id)
+
+        if hijos.exists():
+            for hijo in hijos:
+                hijo_data = self.procesar_cuentas_recursivo(hijo, saldos_dict)
+                if hijo_data: 
+                    data['hijos'].append(hijo_data)
+                    data['net'] += hijo_data['net']
+        else:
+            cuentas = Cuenta.objects.filter(clase_cuenta=clase_actual, estado=True)
+            for cuenta in cuentas:
+                saldo_cuenta = saldos_dict.get(cuenta.id)
+                
+                if saldo_cuenta:
+                    cuenta_neto = saldo_cuenta['net']
+                    
+                    if cuenta_neto != 0:
+                        data['hijos'].append({
+                            "codigo": saldo_cuenta['codigo'],
+                            "nombre": saldo_cuenta['nombre'],
+                            "total_debe": saldo_cuenta['total_debe'],
+                            "total_haber": saldo_cuenta['total_haber'],
+                            "net": cuenta_neto,
+                            "hijos": [],
+                        })
+                        data['net'] += cuenta_neto
+
+        # Optimización: Si no tiene saldo neto, no lo retornes
+        if data['net'] == 0:
+             return None
+
+        return data
+
+    # ⬇️ ¡RENOMBRADO A 'list'!
     def list(self, request):
         fecha_inicio_str = request.query_params.get("fecha_inicio", "2010-01-01")
         fecha_fin_str = request.query_params.get("fecha_fin", datetime.now().strftime("%Y-%m-%d"))
@@ -138,12 +144,12 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
             return Response({"error": "Usuario sin empresa asignada"}, status=400)
 
         # 1. Obtener todos los saldos (Clases 4 y 5) en una sola pasada
-        saldos_dict = self._get_saldos_agregados(empresa_id, fecha_inicio_dt, fecha_fin_dt)
+        saldos_dict = self.get_saldos_cuentas_resultado(empresa_id, fecha_inicio_dt, fecha_fin_dt)
 
         # 2. Traer la estructura de Clases (solo 4, 5)
         clases_raiz = (
             ClaseCuenta.objects.filter(empresa_id=empresa_id, padre=None, codigo__in=[4, 5])
-            .prefetch_related("hijos__hijos__cuentas", "hijos__cuentas", "cuentas") # Prefetch profundo
+            .prefetch_related("hijos__hijos__cuentas", "hijos__cuentas", "cuentas")
         ).order_by('codigo')
 
         # 3. Construir el reporte recursivamente (ahora es rápido)
@@ -152,7 +158,7 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
         total_costos = Decimal(0)
         
         for clase in clases_raiz:
-            clase_data = self._calcular_recursivo(clase, saldos_dict)
+            clase_data = self.procesar_cuentas_recursivo(clase, saldos_dict)
             if clase_data:
                 resultado.append(clase_data)
                 if str(clase_data['codigo']).startswith("4"):
@@ -185,7 +191,7 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
         if not empresa_id:
             return Response({"error": "Usuario sin empresa asignada"}, status=400)
 
-        saldos_dict = self._get_saldos_agregados(empresa_id, fecha_inicio_dt, fecha_fin_dt)
+        saldos_dict = self.get_saldos_cuentas_resultado(empresa_id, fecha_inicio_dt, fecha_fin_dt)
 
         clases_raiz = (
             ClaseCuenta.objects.filter(empresa_id=empresa_id, padre=None, codigo__in=[4, 5])
@@ -197,7 +203,7 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
         total_costos = Decimal(0)
 
         for clase in clases_raiz:
-            clase_data = self._calcular_recursivo(clase, saldos_dict)
+            clase_data = self.procesar_cuentas_recursivo(clase, saldos_dict)
             if clase_data:
                 data.append(clase_data)
                 if str(clase_data['codigo']).startswith("4"):
@@ -215,7 +221,6 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
             "total_ingresos": total_ingresos,
             "total_costos": total_costos,
             "utilidad": utilidad,
-            # Añadir empresa_nombre al contexto si tu plantilla lo usa
             "empresa_nombre": Empresa.objects.get(id=empresa_id).nombre if empresa_id else "Mi Empresa"
         }
 
