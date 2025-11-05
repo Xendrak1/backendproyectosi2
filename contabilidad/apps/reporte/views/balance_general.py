@@ -7,7 +7,7 @@ from django.db.models import Sum, Q, DecimalField
 from django.db.models.functions import Coalesce
 from ...gestion_cuenta.models import ClaseCuenta, Cuenta
 from ...gestion_asiento.models import Movimiento
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta 
 from ..services.pdf import render_to_pdf, build_pdf_response
 from decimal import Decimal
 

@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db.models import Sum, Q, DecimalField
 from django.db.models.functions import Coalesce
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from ...gestion_cuenta.models import ClaseCuenta, Cuenta
