@@ -1,10 +1,11 @@
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import viewsets # ⬅️ ¡IMPORTACIÓN CLAVE!
+# apps/reporte/views/estado_resultados.py
+from rest_framework import viewsets
+from rest_framework.decorators import action # ⬅️ ¡AÑADIDO! Esta es la corrección
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 from django.db.models import Sum, Q, DecimalField
 from django.db.models.functions import Coalesce
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta, date # ⬅️ 'date' añadido
 from decimal import Decimal
 
 from ...gestion_cuenta.models import ClaseCuenta, Cuenta
@@ -21,14 +22,23 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
     
     def _get_empresa(self, request):
         """Función helper para obtener la empresa de forma segura."""
-        if hasattr(request, 'empresa_id') and request.empresa_id:
-             return request.empresa_id
+        # ⬇️ ¡CORREGIDO! Tu lógica de 'request.auth.get' devuelve un objeto Empresa, no solo el ID.
         if hasattr(request, 'auth') and request.auth:
              empresa = request.auth.get('empresa')
              if empresa:
-                 return empresa.id # ⬅️ ¡CORREGIDO!
+                 return empresa # Devolvemos el objeto Empresa completo
+        
+        # Fallback por si el middleware usa 'request.empresa_id'
+        if hasattr(request, 'empresa_id') and request.empresa_id:
+             try:
+                 return Empresa.objects.get(id=request.empresa_id)
+             except Empresa.DoesNotExist:
+                 pass
+        
+        # Fallback final para el usuario logueado
         if hasattr(request, 'user') and hasattr(request.user, 'user_empresa'):
-            return request.user.user_empresa.empresa_id
+            return request.user.user_empresa.empresa
+            
         return None
 
     def get_clases_raiz(self, empresa_id):
@@ -41,12 +51,12 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
 
     def get_saldos_cuentas_resultado(self, empresa_id, fecha_inicio, fecha_fin):
         """
-        Obtiene los saldos de todas las cuentas de Ingreso y Egreso
-        (Clases 4, 5) para el RANGO de fechas.
+        OPTIMIZACIÓN: Hace UNA sola consulta a la BBDD para obtener todos los saldos
+        de Ingresos y Egresos (Clases 4 y 5) en el rango de fechas.
         """
         saldos_qs = Movimiento.objects.filter(
             asiento_contable__empresa_id=empresa_id,
-            asiento_contable__fecha__range=[fecha_inicio, fecha_fin], # RANGO de fechas
+            asiento_contable__fecha__range=[fecha_inicio, fecha_fin], # RANGO
             estado=True
         ).filter(
             Q(cuenta__clase_cuenta__codigo__startswith='4') |
@@ -82,51 +92,50 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
                 }
         return saldos_dict
 
-    def procesar_cuentas_recursivo(self, clase_actual, saldos_dict):
+    def procesar_cuentas_recursivo(self, clase, saldos_dict):
         """
-        Función recursiva optimizada.
+        Función recursiva MEJORADA.
+        Ya no hace consultas a la BBDD, solo lee del 'saldos_dict'.
         """
-        data = {
-            "codigo": clase_actual.codigo,
-            "nombre": clase_actual.nombre,
-            "total_debe": Decimal(0),
-            "total_haber": Decimal(0),
-            "net": Decimal(0), # (Saldo según naturaleza)
-            "hijos": []
-        }
+        
+        cuentas_data = []
+        for cuenta_id, saldo_info in saldos_dict.items():
+            if saldo_info['clase_id'] == clase.id:
+                cuentas_data.append({
+                    "codigo": saldo_info['codigo'],
+                    "nombre": saldo_info['nombre'],
+                    "total_debe": saldo_info['total_debe'],
+                    "total_haber": saldo_info['total_haber'],
+                    "net": saldo_info['net'], # 'net' es el saldo con naturaleza
+                    "hijos": [],
+                })
 
-        hijos = clase_actual.hijos.filter(empresa_id=clase_actual.empresa_id)
+        hijos_data = []
+        total_net_hijos = Decimal(0)
+        
+        for hijo in clase.hijos.all(): # .all() es rápido por el prefetch_related
+            hijo_data = self.procesar_cuentas_recursivo(hijo, saldos_dict)
+            if hijo_data: 
+                hijos_data.append(hijo_data)
+                total_net_hijos += hijo_data['net']
 
-        if hijos.exists():
-            for hijo in hijos:
-                hijo_data = self.procesar_cuentas_recursivo(hijo, saldos_dict)
-                if hijo_data: 
-                    data['hijos'].append(hijo_data)
-                    data['net'] += hijo_data['net']
-        else:
-            cuentas = Cuenta.objects.filter(clase_cuenta=clase_actual, estado=True)
-            for cuenta in cuentas:
-                saldo_cuenta = saldos_dict.get(cuenta.id)
-                
-                if saldo_cuenta:
-                    cuenta_neto = saldo_cuenta['net']
-                    
-                    if cuenta_neto != 0:
-                        data['hijos'].append({
-                            "codigo": saldo_cuenta['codigo'],
-                            "nombre": saldo_cuenta['nombre'],
-                            "total_debe": saldo_cuenta['total_debe'],
-                            "total_haber": saldo_cuenta['total_haber'],
-                            "net": cuenta_neto,
-                            "hijos": [],
-                        })
-                        data['net'] += cuenta_neto
+        total_net_propias = sum(c['net'] for c in cuentas_data)
+        total_net = total_net_propias + total_net_hijos
+        
+        hijos_completos = cuentas_data + hijos_data
 
-        # Optimización: Si no tiene saldo neto, no lo retornes
-        if data['net'] == 0:
+        if not hijos_completos:
              return None
 
-        return data
+        return {
+            "codigo": clase.codigo,
+            "nombre": clase.nombre,
+            "total_debe": sum(c['total_debe'] for c in hijos_completos),
+            "total_haber": sum(c['total_haber'] for c in hijos_completos),
+            "saldo": 0, # 'saldo' (debe-haber) no es relevante en E.R.
+            "net": total_net, # Usamos 'net' (saldo con naturaleza)
+            "hijos": hijos_completos,
+        }
 
     # ⬇️ ¡RENOMBRADO A 'list'!
     def list(self, request):
@@ -139,20 +148,18 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
         except ValueError:
             return Response({"error": "Formato de fecha inválido. Use YYYY-MM-DD"}, status=400)
 
-        empresa_id = self._get_empresa(request)
-        if not empresa_id:
+        empresa = self._get_empresa(request)
+        if not empresa:
             return Response({"error": "Usuario sin empresa asignada"}, status=400)
-
-        # 1. Obtener todos los saldos (Clases 4 y 5) en una sola pasada
+        empresa_id = empresa.id
+        
         saldos_dict = self.get_saldos_cuentas_resultado(empresa_id, fecha_inicio_dt, fecha_fin_dt)
 
-        # 2. Traer la estructura de Clases (solo 4, 5)
         clases_raiz = (
             ClaseCuenta.objects.filter(empresa_id=empresa_id, padre=None, codigo__in=[4, 5])
             .prefetch_related("hijos__hijos__cuentas", "hijos__cuentas", "cuentas")
         ).order_by('codigo')
 
-        # 3. Construir el reporte recursivamente (ahora es rápido)
         resultado = []
         total_ingresos = Decimal(0)
         total_costos = Decimal(0)
@@ -187,10 +194,11 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
         except ValueError:
             return Response({"error": "Formato de fecha inválido. Use YYYY-MM-DD"}, status=400)
 
-        empresa_id = self._get_empresa(request)
-        if not empresa_id:
+        empresa = self._get_empresa(request)
+        if not empresa:
             return Response({"error": "Usuario sin empresa asignada"}, status=400)
-
+        empresa_id = empresa.id
+        
         saldos_dict = self.get_saldos_cuentas_resultado(empresa_id, fecha_inicio_dt, fecha_fin_dt)
 
         clases_raiz = (
@@ -221,18 +229,16 @@ class EstadoResultadosViewSet(viewsets.ViewSet):
             "total_ingresos": total_ingresos,
             "total_costos": total_costos,
             "utilidad": utilidad,
-            "empresa_nombre": Empresa.objects.get(id=empresa_id).nombre if empresa_id else "Mi Empresa"
+            "empresa_nombre": empresa.nombre if empresa else "Mi Empresa"
         }
 
         # ⬇️ --- ¡USANDO TUS FUNCIONES CORRECTAS! --- ⬇️
-        # (Tu archivo pdf.py tiene 'render_to_pdf_estado_resultado', pero no 'render_to_pdf' genérico)
-        # Vamos a asumir que quieres usar la genérica que sí importaste.
+        # (Tu archivo pdf.py tiene 'render_to_pdf_estado_resultado')
         try:
-            # Intenta usar la específica si existe (basado en tu otro archivo)
             from ..services.pdf import render_to_pdf_estado_resultado
             pdf = render_to_pdf_estado_resultado("reporte/pdf/estado_resultados.html", context)
         except ImportError:
-            # Si no existe, usa la genérica
+            # Fallback a la genérica si la específica no está
             pdf = render_to_pdf("reporte/pdf/estado_resultados.html", context)
 
         filename = f"estado_resultados_{fecha_fin_str}.pdf"
