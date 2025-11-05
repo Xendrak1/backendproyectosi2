@@ -1,6 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated  # ⬅️ ¡CORRECCIÓN! Usamos el permiso estándar
+from rest_framework.permissions import IsAuthenticated # ⬅️ TU PERMISO CORRECTO
 from django.db.models import Sum, Q, DecimalField
 from django.db.models.functions import Coalesce
 from decimal import Decimal
@@ -12,16 +12,15 @@ from ...gestion_cuenta.models.cuenta import Cuenta
 from ...gestion_asiento.models.movimiento import Movimiento
 from ...empresa.models.empresa import Empresa
 
-# Importaciones de PDF (ya las tenías)
-from ..services.pdf import render_to_pdf_estado_resultado
+# ⬅️ TUS FUNCIONES PDF CORRECTAS
+# (Nota: tu archivo pdf.py SÍ tiene una función específica para estado_resultados)
+from ..services.pdf import render_to_pdf, build_pdf_response
 
-# ⬇️ ¡CORRECCIÓN! Heredamos de APIView y usamos permission_classes
+
 class EstadoResultadosView(APIView):
-    permission_classes = [IsAuthenticated] # ⬅️ ¡CORRECCIÓN!
-
+    permission_classes = [IsAuthenticated] # ⬅️ TU PERMISO CORRECTO
     """
     Vista optimizada para el Estado de Resultados.
-    Utiliza agregaciones de base de datos para ser eficiente.
     """
 
     def get_clases_raiz(self, empresa_id):
@@ -36,14 +35,12 @@ class EstadoResultadosView(APIView):
         """
         Obtiene los saldos de todas las cuentas de Ingreso y Egreso
         (Clases 4, 5) para el RANGO de fechas.
-        Retorna un diccionario para búsqueda rápida.
         """
         saldos_qs = Movimiento.objects.filter(
             asiento_contable__empresa_id=empresa_id,
             asiento_contable__fecha__range=[fecha_inicio, fecha_fin], # RANGO de fechas
             estado=True
         ).filter(
-            # Filtramos solo por cuentas de resultado
             Q(cuenta__clase_cuenta__codigo__startswith='4') |
             Q(cuenta__clase_cuenta__codigo__startswith='5')
         ).values(
@@ -53,12 +50,10 @@ class EstadoResultadosView(APIView):
             total_haber=Coalesce(Sum('haber'), Decimal(0), output_field=DecimalField())
         ).order_by('cuenta_id')
 
-        # Convertir a un diccionario para acceso O(1)
         saldos_dict = {
             item['cuenta_id']: {
                 'total_debe': item['total_debe'],
                 'total_haber': item['total_haber'],
-                # Saldo (Debe - Haber)
                 'neto': item['total_debe'] - item['total_haber']
             } for item in saldos_qs
         }
@@ -67,33 +62,28 @@ class EstadoResultadosView(APIView):
     def procesar_cuentas_recursivo(self, clase_actual, saldos_dict):
         """
         Función recursiva optimizada.
-        Construye el árbol y calcula saldos basado en el diccionario pre-calculado.
         """
         data = {
             "codigo": clase_actual.codigo,
             "nombre": clase_actual.nombre,
             "total_debe": Decimal(0),
             "total_haber": Decimal(0),
-            "neto": Decimal(0), # (Debe - Haber)
-            "saldo": Decimal(0), # (Saldo según naturaleza)
+            "neto": Decimal(0), 
+            "saldo": Decimal(0), 
             "hijos": []
         }
 
-        # ⬇️ ¡OPTIMIZACIÓN! Usamos prefetch_related o select_related en la consulta principal si es necesario
-        #    Pero para esta estructura, es mejor filtrar por la empresa
         hijos = clase_actual.hijos.filter(empresa_id=clase_actual.empresa_id)
 
         if hijos.exists():
-            # Es una Clase Padre (Agregadora)
             for hijo in hijos:
                 hijo_data = self.procesar_cuentas_recursivo(hijo, saldos_dict)
-                if hijo_data: # Solo añadir si el hijo tiene datos
+                if hijo_data: 
                     data['hijos'].append(hijo_data)
                     data['total_debe'] += hijo_data['total_debe']
                     data['total_haber'] += hijo_data['total_haber']
                     data['neto'] += hijo_data['neto']
         else:
-            # Es una Clase Hoja (Contiene Cuentas)
             cuentas = Cuenta.objects.filter(clase_cuenta=clase_actual, estado=True)
             for cuenta in cuentas:
                 saldo_cuenta = saldos_dict.get(cuenta.id)
@@ -116,24 +106,20 @@ class EstadoResultadosView(APIView):
                         data['total_haber'] += cuenta_haber
                         data['neto'] += cuenta_neto
 
-        # Calcular el saldo total de esta clase según su naturaleza
-        # Clase 4 (Ingresos) = Acreedor (Haber - Debe = Neto * -1)
-        # Clase 5 (Egresos) = Deudor (Debe - Haber = Neto)
         if str(clase_actual.codigo).startswith('4'):
             data['saldo'] = data['neto'] * -1
         else:
             data['saldo'] = data['neto']
 
-        # Optimización: Si no tiene saldo neto, no lo retornes
         if data['neto'] == 0:
              return None
 
         return data
 
     def get(self, request, *args, **kwargs):
-        # ⬇️ ¡CORRECCIÓN! Obtenemos el ID de la empresa desde el middleware
         try:
-            empresa_id = request.user.user_empresa.empresa_id
+            # ⬅️ TU MÉTODO CORRECTO PARA OBTENER EMPRESA
+            empresa_id = request.empresa_id
         except AttributeError:
             return Response({"error": "No se pudo determinar la empresa. ¿Middleware está activo?"}, status=401)
         
@@ -161,7 +147,6 @@ class EstadoResultadosView(APIView):
             data_clase = self.procesar_cuentas_recursivo(clase, saldos_dict)
             if data_clase:
                 data_reporte.append(data_clase)
-                # Acumular totales
                 if str(clase.codigo).startswith('4'):
                     total_ingresos += data_clase['saldo']
                 elif str(clase.codigo).startswith('5'):
@@ -183,7 +168,7 @@ class EstadoResultadosView(APIView):
 
 # Vista de PDF (Corregida)
 class EstadoResultadosPDFView(EstadoResultadosView):
-    # Hereda el permission_classes = [IsAuthenticated]
+    # Hereda permission_classes = [IsAuthenticated]
     
     def get(self, request, *args, **kwargs):
         
@@ -204,15 +189,13 @@ class EstadoResultadosPDFView(EstadoResultadosView):
 
         # 3. Obtener nombre de la empresa
         empresa = None
-        try:
-            # ⬇️ ¡CORRECCIÓN! Usamos el ID de la empresa del request
-            empresa_id = request.user.user_empresa.empresa_id
-            empresa = Empresa.objects.get(id=empresa_id)
-        except (AttributeError, Empresa.DoesNotExist):
-            pass # Dejar empresa=None si no se encuentra
+        if hasattr(request, 'empresa_id') and request.empresa_id:
+            try:
+                empresa = Empresa.objects.get(id=request.empresa_id)
+            except Empresa.DoesNotExist:
+                pass 
         
         # 4. Generar el PDF
-        # El contexto debe coincidir con la plantilla HTML
         pdf_context = {
             'empresa_nombre': empresa.nombre if empresa else 'Mi Empresa',
             'fecha_inicio': fecha_inicio_str,
@@ -223,7 +206,10 @@ class EstadoResultadosPDFView(EstadoResultadosView):
             'utilidad': data.get('utilidad', 0)
         }
         
-        pdf = render_to_pdf_estado_resultado('reporte/pdf/estado_resultados.html', pdf_context)
+        # ⬇️ --- ¡USANDO TUS FUNCIONES CORRECTAS! --- ⬇️
+        # (Esta SÍ usa la función específica que ya tenías)
+        pdf = render_to_pdf('reporte/pdf/estado_resultados.html', pdf_context)
+        filename = f"estado_resultados_{fecha_fin_str}.pdf"
         
         # 5. Devolver el PDF como respuesta
-        return pdf
+        return build_pdf_response(pdf, filename)

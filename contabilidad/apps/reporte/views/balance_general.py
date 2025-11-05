@@ -1,6 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated  # ⬅️ ¡CORRECCIÓN! Usamos el permiso estándar
+from rest_framework.permissions import IsAuthenticated # ⬅️ TU PERMISO CORRECTO
 from django.db.models import Sum, Q, DecimalField
 from django.db.models.functions import Coalesce
 from decimal import Decimal
@@ -12,13 +12,12 @@ from ...gestion_cuenta.models.cuenta import Cuenta
 from ...gestion_asiento.models.movimiento import Movimiento
 from ...empresa.models.empresa import Empresa
 
-# Importaciones de PDF (ya las tenías)
-from ..services.pdf import render_to_pdf_balance_general
+# ⬅️ TUS FUNCIONES PDF CORRECTAS
+from ..services.pdf import render_to_pdf, build_pdf_response
 
-# ⬇️ ¡CORRECCIÓN! Heredamos de APIView y usamos permission_classes
+
 class BalanceGeneralView(APIView):
-    permission_classes = [IsAuthenticated] # ⬅️ ¡CORRECCIÓN!
-
+    permission_classes = [IsAuthenticated] # ⬅️ TU PERMISO CORRECTO
     """
     Vista optimizada para el Balance General.
     """
@@ -154,9 +153,9 @@ class BalanceGeneralView(APIView):
         return data
 
     def get(self, request, *args, **kwargs):
-        # ⬇️ ¡CORRECCIÓN! Obtenemos el ID de la empresa desde el middleware
         try:
-            empresa_id = request.user.user_empresa.empresa_id
+            # ⬅️ TU MÉTODO CORRECTO PARA OBTENER EMPRESA
+            empresa_id = request.empresa_id
         except AttributeError:
             return Response({"error": "No se pudo determinar la empresa. ¿Middleware está activo?"}, status=401)
         
@@ -214,7 +213,7 @@ class BalanceGeneralView(APIView):
 
 # Vista de PDF (Corregida)
 class BalanceGeneralPDFView(BalanceGeneralView):
-    # Hereda el permission_classes = [IsAuthenticated]
+    # Hereda permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
         
@@ -235,22 +234,26 @@ class BalanceGeneralPDFView(BalanceGeneralView):
 
         # 3. Obtener nombre de la empresa
         empresa = None
-        try:
-            # ⬇️ ¡CORRECCIÓN! Usamos el ID de la empresa del request
-            empresa_id = request.user.user_empresa.empresa_id
-            empresa = Empresa.objects.get(id=empresa_id)
-        except (AttributeError, Empresa.DoesNotExist):
-            pass # Dejar empresa=None si no se encuentra
+        if hasattr(request, 'empresa_id') and request.empresa_id:
+            try:
+                empresa = Empresa.objects.get(id=request.empresa_id)
+            except Empresa.DoesNotExist:
+                pass # Dejar empresa=None si no se encuentra
         
-        # 4. Generar el PDF
+        # 4. Generar el PDF (USANDO TU LÓGICA ORIGINAL)
         pdf_context = {
             'empresa_nombre': empresa.nombre if empresa else 'Mi Empresa',
             'fecha_inicio': fecha_inicio_str,
             'fecha_fin': fecha_fin_str,
             'data': data
+            # Nota: Tu plantilla 'balance_general.html' debe ser compatible
+            # con esta nueva estructura de 'data' (que ya es el árbol completo)
         }
         
-        pdf = render_to_pdf_balance_general('reporte/pdf/balance_general.html', pdf_context)
+        # ⬇️ --- ¡USANDO TUS FUNCIONES CORRECTAS! --- ⬇️
+        # (Asumo que tu plantilla se llama 'balance_general.html' como en el código que borré)
+        pdf = render_to_pdf('reporte/pdf/balance_general.html', pdf_context)
+        filename = f"balance_general_{fecha_fin_str}.pdf"
         
         # 5. Devolver el PDF como respuesta
-        return pdf
+        return build_pdf_response(pdf, filename)
