@@ -321,7 +321,7 @@ def run():
     asiento_creados = 0
 
     # (Aumentamos a 1000 para una mejor demo)
-    for i in range(100): 
+    for i in range(1000): 
         
         # 1. Elegir un tipo de asiento al azar
         tipo_asiento_key = random.choice(lista_tipos)
