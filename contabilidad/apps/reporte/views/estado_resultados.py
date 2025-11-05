@@ -13,11 +13,11 @@ from ...gestion_asiento.models.movimiento import Movimiento
 from ...empresa.models.empresa import Empresa
 
 # ⬅️ TUS FUNCIONES PDF CORRECTAS
-# (Nota: tu archivo pdf.py SÍ tiene una función específica para estado_resultados)
 from ..services.pdf import render_to_pdf, build_pdf_response
 
 
-class EstadoResultadosView(APIView):
+# ⬇️ ¡NOMBRE CORREGIDO! Usa 'ViewSet' como espera tu __init__.py
+class EstadoResultadosViewSet(APIView):
     permission_classes = [IsAuthenticated] # ⬅️ TU PERMISO CORRECTO
     """
     Vista optimizada para el Estado de Resultados.
@@ -121,7 +121,10 @@ class EstadoResultadosView(APIView):
             # ⬅️ TU MÉTODO CORRECTO PARA OBTENER EMPRESA
             empresa_id = request.empresa_id
         except AttributeError:
-            return Response({"error": "No se pudo determinar la empresa. ¿Middleware está activo?"}, status=401)
+             try:
+                empresa_id = request.user.user_empresa.empresa_id
+             except AttributeError:
+                return Response({"error": "No se pudo determinar la empresa. ¿Middleware está activo?"}, status=401)
         
         # --- Obtener filtros de fecha ---
         fecha_inicio_str = request.query_params.get('fecha_inicio', date(date.today().year, 1, 1).strftime('%Y-%m-%d'))
@@ -167,7 +170,7 @@ class EstadoResultadosView(APIView):
 
 
 # Vista de PDF (Corregida)
-class EstadoResultadosPDFView(EstadoResultadosView):
+class EstadoResultadosPDFView(EstadoResultadosViewSet):
     # Hereda permission_classes = [IsAuthenticated]
     
     def get(self, request, *args, **kwargs):
@@ -192,8 +195,11 @@ class EstadoResultadosPDFView(EstadoResultadosView):
         if hasattr(request, 'empresa_id') and request.empresa_id:
             try:
                 empresa = Empresa.objects.get(id=request.empresa_id)
-            except Empresa.DoesNotExist:
-                pass 
+            except (AttributeError, Empresa.DoesNotExist):
+                try:
+                    empresa = Empresa.objects.get(id=request.user.user_empresa.empresa_id)
+                except (AttributeError, Empresa.DoesNotExist):
+                    pass
         
         # 4. Generar el PDF
         pdf_context = {

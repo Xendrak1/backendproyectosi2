@@ -16,7 +16,8 @@ from ...empresa.models.empresa import Empresa
 from ..services.pdf import render_to_pdf, build_pdf_response
 
 
-class BalanceGeneralView(APIView):
+# ⬇️ ¡NOMBRE CORREGIDO! Usa 'ViewSet' como espera tu __init__.py
+class BalanceGeneralViewSet(APIView):
     permission_classes = [IsAuthenticated] # ⬅️ TU PERMISO CORRECTO
     """
     Vista optimizada para el Balance General.
@@ -157,7 +158,11 @@ class BalanceGeneralView(APIView):
             # ⬅️ TU MÉTODO CORRECTO PARA OBTENER EMPRESA
             empresa_id = request.empresa_id
         except AttributeError:
-            return Response({"error": "No se pudo determinar la empresa. ¿Middleware está activo?"}, status=401)
+            # Intentar obtenerlo del usuario si el Mixin no se usó (ej. en PDF view)
+            try:
+                empresa_id = request.user.user_empresa.empresa_id
+            except AttributeError:
+                return Response({"error": "No se pudo determinar la empresa. ¿Middleware está activo?"}, status=401)
         
         # --- Obtener filtros de fecha ---
         fecha_inicio_str = request.query_params.get('fecha_inicio', date(date.today().year, 1, 1).strftime('%Y-%m-%d'))
@@ -194,9 +199,9 @@ class BalanceGeneralView(APIView):
             resultado_data = {
                 "codigo": "3.R", # Código inventado para el resultado
                 "nombre": "Resultado del Ejercicio (Utilidad/Pérdida)",
-                "total_debe": Decimal(0) if resultado_ejercicio < 0 else resultado_ejercicio,
-                "total_haber": abs(resultado_ejercicio) if resultado_ejercicio < 0 else Decimal(0),
-                "saldo": resultado_ejercicio * -1, 
+                "total_debe": Decimal(0) if resultado_ejercicio > 0 else abs(resultado_ejercicio), # Pérdida = Debe
+                "total_haber": resultado_ejercicio if resultado_ejercicio > 0 else Decimal(0), # Utilidad = Haber
+                "saldo": resultado_ejercicio * -1, # Saldo contable (Haber - Debe)
                 "hijos": []
             }
             
@@ -212,7 +217,7 @@ class BalanceGeneralView(APIView):
 
 
 # Vista de PDF (Corregida)
-class BalanceGeneralPDFView(BalanceGeneralView):
+class BalanceGeneralPDFView(BalanceGeneralViewSet):
     # Hereda permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
@@ -237,8 +242,12 @@ class BalanceGeneralPDFView(BalanceGeneralView):
         if hasattr(request, 'empresa_id') and request.empresa_id:
             try:
                 empresa = Empresa.objects.get(id=request.empresa_id)
-            except Empresa.DoesNotExist:
-                pass # Dejar empresa=None si no se encuentra
+            except (AttributeError, Empresa.DoesNotExist):
+                # Fallback por si el middleware no corrió (ej. llamada directa)
+                try:
+                    empresa = Empresa.objects.get(id=request.user.user_empresa.empresa_id)
+                except (AttributeError, Empresa.DoesNotExist):
+                    pass # Dejar empresa=None si no se encuentra
         
         # 4. Generar el PDF (USANDO TU LÓGICA ORIGINAL)
         pdf_context = {
