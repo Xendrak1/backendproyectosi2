@@ -1,5 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated  # ⬅️ ¡CORRECCIÓN! Usamos el permiso estándar
 from django.db.models import Sum, Q, DecimalField
 from django.db.models.functions import Coalesce
 from decimal import Decimal
@@ -9,24 +10,17 @@ from datetime import date
 from ...gestion_cuenta.models.clase_cuenta import ClaseCuenta
 from ...gestion_cuenta.models.cuenta import Cuenta
 from ...gestion_asiento.models.movimiento import Movimiento
-from ...empresa.models.empresa import Empresa #Importación para el PDF
-
-# --- ESTA ES LA CORRECCIÓN ---
-# Importar el Mixin desde su ubicación REAL en la app 'usuario'
-from ...usuario.views.auth import EmpresaPermissionsMixin 
+from ...empresa.models.empresa import Empresa
 
 # Importaciones de PDF (ya las tenías)
 from ..services.pdf import render_to_pdf_balance_general
 
-class BalanceGeneralView(EmpresaPermissionsMixin, APIView):
+# ⬇️ ¡CORRECCIÓN! Heredamos de APIView y usamos permission_classes
+class BalanceGeneralView(APIView):
+    permission_classes = [IsAuthenticated] # ⬅️ ¡CORRECCIÓN!
+
     """
     Vista optimizada para el Balance General.
-    
-    Esta vista calcula los saldos de las cuentas de balance (1, 2, 3) y
-    calcula el resultado del ejercicio (4, 5) para inyectarlo en el patrimonio,
-    asegurando que el balance siempre cuadre.
-    
-    Utiliza agregaciones de base de datos para ser eficiente.
     """
 
     def get_clases_raiz(self, empresa_id):
@@ -105,7 +99,6 @@ class BalanceGeneralView(EmpresaPermissionsMixin, APIView):
     def procesar_cuentas_recursivo(self, clase_actual, saldos_dict):
         """
         Función recursiva optimizada.
-        Ya no recibe la lista de movimientos, sino el diccionario de saldos pre-calculado.
         """
         data = {
             "codigo": clase_actual.codigo,
@@ -139,7 +132,6 @@ class BalanceGeneralView(EmpresaPermissionsMixin, APIView):
                     
                     # Solo incluir cuentas con saldo
                     if cuenta_debe != 0 or cuenta_haber != 0:
-                        # Añadir la cuenta individual como "hijo"
                         data['hijos'].append({
                             "codigo": cuenta.codigo,
                             "nombre": cuenta.nombre,
@@ -162,7 +154,11 @@ class BalanceGeneralView(EmpresaPermissionsMixin, APIView):
         return data
 
     def get(self, request, *args, **kwargs):
-        empresa_id = request.empresa_id
+        # ⬇️ ¡CORRECCIÓN! Obtenemos el ID de la empresa desde el middleware
+        try:
+            empresa_id = request.user.user_empresa.empresa_id
+        except AttributeError:
+            return Response({"error": "No se pudo determinar la empresa. ¿Middleware está activo?"}, status=401)
         
         # --- Obtener filtros de fecha ---
         fecha_inicio_str = request.query_params.get('fecha_inicio', date(date.today().year, 1, 1).strftime('%Y-%m-%d'))
@@ -216,8 +212,9 @@ class BalanceGeneralView(EmpresaPermissionsMixin, APIView):
         return Response(response_data)
 
 
-# Vista de PDF (Corregida para usar request.empresa_id)
+# Vista de PDF (Corregida)
 class BalanceGeneralPDFView(BalanceGeneralView):
+    # Hereda el permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
         
@@ -238,12 +235,12 @@ class BalanceGeneralPDFView(BalanceGeneralView):
 
         # 3. Obtener nombre de la empresa
         empresa = None
-        if hasattr(request, 'empresa_id') and request.empresa_id:
-            try:
-                # Buscamos la empresa manualmente usando el ID
-                empresa = Empresa.objects.get(id=request.empresa_id)
-            except Empresa.DoesNotExist:
-                pass # Dejar empresa=None si no se encuentra
+        try:
+            # ⬇️ ¡CORRECCIÓN! Usamos el ID de la empresa del request
+            empresa_id = request.user.user_empresa.empresa_id
+            empresa = Empresa.objects.get(id=empresa_id)
+        except (AttributeError, Empresa.DoesNotExist):
+            pass # Dejar empresa=None si no se encuentra
         
         # 4. Generar el PDF
         pdf_context = {
