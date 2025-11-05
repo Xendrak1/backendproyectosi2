@@ -7,6 +7,7 @@ def run():
             "email": "user1@gmail.com",
             "password": "123456",
             "is_staff": False,
+            
             "nombre": "Christian",
             "apellido": "Torrez",
             "ci": "123456",
@@ -52,7 +53,9 @@ def run():
                 "email": data.get("email"),
                 "persona": persona,
                 "is_staff": data.get("is_staff", False),
-                "is_active": True
+                "is_active": True,
+                "verified": True,
+            
             }
         )
 

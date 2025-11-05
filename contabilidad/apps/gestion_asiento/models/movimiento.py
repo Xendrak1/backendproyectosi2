@@ -7,7 +7,7 @@ class Movimiento(models.Model):
     class Meta:
         db_table = "movimiento"
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    referencia = models.CharField(max_length=100)
+    referencia = models.CharField(max_length=100,null=True,blank=True)
     debe = models.DecimalField(max_digits=10,decimal_places=3)
     haber = models.DecimalField(max_digits=10,decimal_places=3)
     cuenta = models.ForeignKey(

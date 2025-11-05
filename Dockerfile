@@ -1,4 +1,4 @@
-# Imagen base
+# Imagen base 5/11/2025
 FROM python:3.11-slim
 
 # Configuración Python
