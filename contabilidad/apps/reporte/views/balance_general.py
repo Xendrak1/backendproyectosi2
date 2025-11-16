@@ -104,6 +104,27 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
 
         resultado = [calcular_saldo(c) for c in clases]
 
+        total_ingresos = 0
+        total_gastos = 0
+
+        # Buscar los nodos de ingresos (4) y gastos (5) en todas las clases cargadas
+        for clase in clases:
+            if clase.codigo == 4:
+                nodo_ingresos = calcular_saldo(clase)
+                total_ingresos = nodo_ingresos["saldo"]
+
+            if clase.codigo == 5:
+                nodo_gastos = calcular_saldo(clase)
+                total_gastos = nodo_gastos["saldo"]
+
+        resultado_ejercicio = total_ingresos - total_gastos
+        
+        for nodo in resultado:
+            if nodo["codigo"] == 3:  # Patrimonio
+                nodo["saldo"] += resultado_ejercicio
+                break
+
+
         return Response(resultado)
 
     @action(detail=False, methods=["get"], url_path="export/pdf")
