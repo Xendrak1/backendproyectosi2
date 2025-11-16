@@ -12,6 +12,12 @@ from ..services.pdf import render_to_pdf, build_pdf_response
 class BalanceGeneralViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = None  # desactiva paginación
+    
+    NATURALEZA = {
+        1: 1,   # Activo → naturaleza DEUDORA
+        2: -1,  # Pasivo → naturaleza ACREEDORA
+        3: -1,  # Patrimonio → naturaleza ACREEDORA
+    }
 
     def list(self, request):
         # Parámetros de fecha
@@ -38,6 +44,7 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
 
         # Función recursiva para calcular saldos
         def calcular_saldo(clase):
+            naturaleza = self.NATURALEZA.get(clase.codigo, 1)
             # IDs de cuentas propias
             ids_cuenta = [cuenta.id for cuenta in clase.cuentas.all()]
 
@@ -50,15 +57,15 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
                     asiento_contable__created_at__lt=fecha_fin_dt,
                 ).aggregate(total_debe=Sum("debe"), total_haber=Sum("haber"))
 
-                total_debe_c = mov_c["total_debe"] or 0
-                total_haber_c = mov_c["total_haber"] or 0
-                saldo_c = total_debe_c - total_haber_c
+                debe = mov_c["total_debe"] or 0
+                haber = mov_c["total_haber"] or 0
+                saldo_c = (debe - haber) * naturaleza
 
                 cuentas_data.append({
                     "codigo": getattr(cuenta, "codigo", None),
                     "nombre": getattr(cuenta, "nombre", ""),
-                    "total_debe": total_debe_c,
-                    "total_haber": total_haber_c,
+                    "total_debe": debe,
+                    "total_haber": haber,
                     "saldo": saldo_c,
                     "hijos": [],
                     "ids": [cuenta.id],
@@ -72,36 +79,35 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
                 ids_cuenta.extend(hijo_data.get("ids", []))
 
             # Movimientos de esas cuentas (incluye cuentas propias + hijos)
-            movimientos = Movimiento.objects.filter(
+            mov_total = Movimiento.objects.filter(
                 cuenta_id__in=ids_cuenta,
                 asiento_contable__created_at__gte=fecha_inicio_dt,
                 asiento_contable__created_at__lt=fecha_fin_dt,
             ).aggregate(total_debe=Sum("debe"), total_haber=Sum("haber"))
 
-            total_debe = movimientos["total_debe"] or 0
-            total_haber = movimientos["total_haber"] or 0
-            saldo = total_debe - total_haber
+            total_debe = mov_total.get("total_debe") or 0
+            total_haber = mov_total.get("total_haber") or 0
+            saldo_total = (total_debe - total_haber) * naturaleza
 
             # Combinar: primero mostrar cuentas directas como hojas, luego las subclases
-            hijos_completos = cuentas_data + hijos_data
+            #hijos_completos = cuentas_data + hijos_data
 
             return {
                 "codigo": clase.codigo,
                 "nombre": clase.nombre,
                 "total_debe": total_debe,
                 "total_haber": total_haber,
-                "saldo": saldo,
-                "hijos": hijos_completos,
+                "saldo": saldo_total,
+                "hijos": cuentas_data + hijos_data,
                 "ids": ids_cuenta,  # opcional, puedes eliminar si no necesitas
             }
 
-        resultado = [calcular_saldo(clase) for clase in clases.filter(padre=None)]
+        resultado = [calcular_saldo(c) for c in clases]
 
         return Response(resultado)
 
     @action(detail=False, methods=["get"], url_path="export/pdf")
     def export_pdf(self, request):
-        # Parámetros de fecha
         fecha_inicio = request.query_params.get("fecha_inicio", "2010-01-01")
         fecha_fin = request.query_params.get("fecha_fin", datetime.now().strftime("%Y-%m-%d"))
 
@@ -121,23 +127,27 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
         )
 
         def calcular_saldo(clase):
-            ids_cuenta = [cuenta.id for cuenta in clase.cuentas.all()]
+            naturaleza = self.NATURALEZA.get(clase.codigo, 1)
+            cuentas_ids = [c.id for c in clase.cuentas.all()]
             cuentas_data = []
+
             for cuenta in clase.cuentas.all():
-                mov_c = Movimiento.objects.filter(
+                mov = Movimiento.objects.filter(
                     cuenta_id=cuenta.id,
                     asiento_contable__created_at__gte=fecha_inicio_dt,
                     asiento_contable__created_at__lt=fecha_fin_dt,
                 ).aggregate(total_debe=Sum("debe"), total_haber=Sum("haber"))
-                total_debe_c = mov_c["total_debe"] or 0
-                total_haber_c = mov_c["total_haber"] or 0
-                saldo_c = total_debe_c - total_haber_c
+
+                debe = mov.get("total_debe") or 0
+                haber = mov.get("total_haber") or 0
+                saldo = (debe - haber) * naturaleza
+
                 cuentas_data.append({
-                    "codigo": getattr(cuenta, "codigo", None),
-                    "nombre": getattr(cuenta, "nombre", ""),
-                    "total_debe": total_debe_c,
-                    "total_haber": total_haber_c,
-                    "saldo": saldo_c,
+                    "codigo": cuenta.codigo,
+                    "nombre": cuenta.nombre,
+                    "total_debe": debe,
+                    "total_haber": haber,
+                    "saldo": saldo,
                     "hijos": [],
                     "ids": [cuenta.id],
                 })
@@ -146,38 +156,34 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
             for hijo in clase.hijos.all():
                 hijo_data = calcular_saldo(hijo)
                 hijos_data.append(hijo_data)
-                ids_cuenta.extend(hijo_data.get("ids", []))
+                cuentas_ids.extend(hijo_data["ids"])
 
-            movimientos = Movimiento.objects.filter(
-                cuenta_id__in=ids_cuenta,
+            mov_total = Movimiento.objects.filter(
+                cuenta_id__in=cuentas_ids,
                 asiento_contable__created_at__gte=fecha_inicio_dt,
                 asiento_contable__created_at__lt=fecha_fin_dt,
             ).aggregate(total_debe=Sum("debe"), total_haber=Sum("haber"))
 
-            total_debe = movimientos["total_debe"] or 0
-            total_haber = movimientos["total_haber"] or 0
-            saldo = total_debe - total_haber
-
-            hijos_completos = cuentas_data + hijos_data
+            total_debe = mov_total.get("total_debe") or 0
+            total_haber = mov_total.get("total_haber") or 0
+            saldo_total = (total_debe - total_haber) * naturaleza
 
             return {
                 "codigo": clase.codigo,
                 "nombre": clase.nombre,
                 "total_debe": total_debe,
                 "total_haber": total_haber,
-                "saldo": saldo,
-                "hijos": hijos_completos,
-                "ids": ids_cuenta,
+                "saldo": saldo_total,
+                "hijos": cuentas_data + hijos_data,
+                "ids": cuentas_ids,
             }
 
-        data = [calcular_saldo(c) for c in clases.filter(padre=None)]
-        # Totales a nivel raíz para no doble contar
-        total_debe = sum((n.get("total_debe") or 0) for n in data)
-        total_haber = sum((n.get("total_haber") or 0) for n in data)
+        data = [calcular_saldo(c) for c in clases]
+
         totales = {
-            "debe": total_debe,
-            "haber": total_haber,
-            "saldo": total_debe - total_haber,
+            "debe": sum(i["total_debe"] for i in data),
+            "haber": sum(i["total_haber"] for i in data),
+            "saldo": sum(i["saldo"] for i in data),
         }
 
         context = {
