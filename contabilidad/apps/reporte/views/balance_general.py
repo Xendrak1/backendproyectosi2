@@ -17,6 +17,8 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
         1: 1,   # Activo → naturaleza DEUDORA
         2: -1,  # Pasivo → naturaleza ACREEDORA
         3: -1,  # Patrimonio → naturaleza ACREEDORA
+        4: -1,
+        5: 1,
     }
 
     def list(self, request):
@@ -38,7 +40,7 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
 
         # Traer todas las clases de la empresa y prefetch cuentas e hijos
         clases = (
-            ClaseCuenta.objects.filter(empresa=empresa, padre=None, codigo__in=[1, 2, 3])
+            ClaseCuenta.objects.filter(empresa=empresa, padre=None, codigo__in=[1, 2, 3, 4, 5])
             .prefetch_related("hijos", "cuentas")
 )
 
@@ -106,24 +108,27 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
 
         total_ingresos = 0
         total_gastos = 0
+        resultado_final_nodo = []
+        nodo_patrimonio = None
 
         # Buscar los nodos de ingresos (4) y gastos (5) en todas las clases cargadas
         for clase in clases:
-            if clase.codigo == 4:
-                nodo_ingresos = calcular_saldo(clase)
-                total_ingresos = nodo_ingresos["saldo"]
-
-            if clase.codigo == 5:
-                nodo_gastos = calcular_saldo(clase)
-                total_gastos = nodo_gastos["saldo"]
+            nodo_calculado = calcular_saldo(clase)
+            codigo = clase.codigo
+            if codigo == 4: # Ingreso
+                total_ingresos = nodo_calculado["saldo"]
+            elif codigo == 5: # Gasto
+                total_gastos = nodo_calculado["saldo"]
+            else: # Activo (1), Pasivo (2), Patrimonio (3)
+                resultado_final_nodo.append(nodo_calculado)
+                # Guardamos la referencia al nodo de patrimonio
+                if codigo == 3:
+                    nodo_patrimonio = nodo_calculado
 
         resultado_ejercicio = total_ingresos - total_gastos
         
-        for nodo in resultado:
-            if nodo["codigo"] == 3:  # Patrimonio
-                nodo["saldo"] += resultado_ejercicio
-                break
-
+        if nodo_patrimonio:
+            nodo_patrimonio["saldo"] += resultado_ejercicio
 
         return Response(resultado)
 
