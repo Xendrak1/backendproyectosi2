@@ -21,8 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar el resto del proyecto
 COPY . /app
 
+RUN chmod +x /app/entrypoint.sh
 # Exponer el puerto
 EXPOSE 8080
 
 # Comando para arrancar Django con Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "contabilidad.wsgi:application", "--timeout", "120"]
+CMD ["/app/entrypoint.sh"]
