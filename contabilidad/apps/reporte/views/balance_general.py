@@ -165,75 +165,113 @@ class BalanceGeneralViewSet(viewsets.ViewSet):
         if not empresa:
             return Response({"error": "Usuario sin empresa asignada"}, status=400)
 
-        clases = (
-            ClaseCuenta.objects.filter(empresa=empresa, padre=None, codigo__in=[1, 2, 3])
+        # 1. OPTIMIZACIÓN: Traer IDs de todas las cuentas de la empresa
+        cuentas_empresa_ids = Cuenta.objects.filter(
+            clase_cuenta__empresa=empresa
+        ).values_list("id", flat=True)
+
+        # 2. OPTIMIZACIÓN: Traer movimientos agrupados (1 sola consulta)
+        movimientos_agrupados = Movimiento.objects.filter(
+            cuenta_id__in=cuentas_empresa_ids,
+            asiento_contable__created_at__gte=fecha_inicio_dt,
+            asiento_contable__created_at__lt=fecha_fin_dt,
+        ).values("cuenta_id").annotate(
+            total_debe=Sum("debe"),
+            total_haber=Sum("haber")
+        )
+
+        # Diccionario rápido para buscar saldos
+        saldos_por_cuenta = {
+            m["cuenta_id"]: {"debe": m["total_debe"] or 0, "haber": m["total_haber"] or 0}
+            for m in movimientos_agrupados
+        }
+
+        # 3. Traer clases raíz (1 a 5) para calcular todo el ejercicio
+        clases_raiz = (
+            ClaseCuenta.objects.filter(empresa=empresa, padre=None, codigo__in=[1, 2, 3, 4, 5])
             .prefetch_related("hijos", "cuentas")
         )
 
-        def calcular_saldo(clase):
+        # Función recursiva optimizada (sin queries)
+        def calcular_saldo_optimizado(clase, saldos_map):
             naturaleza = self.NATURALEZA.get(clase.codigo, 1)
-            cuentas_ids = [c.id for c in clase.cuentas.all()]
+            total_debe_clase = 0
+            total_haber_clase = 0
             cuentas_data = []
 
             for cuenta in clase.cuentas.all():
-                mov = Movimiento.objects.filter(
-                    cuenta_id=cuenta.id,
-                    asiento_contable__created_at__gte=fecha_inicio_dt,
-                    asiento_contable__created_at__lt=fecha_fin_dt,
-                ).aggregate(total_debe=Sum("debe"), total_haber=Sum("haber"))
+                saldos = saldos_map.get(cuenta.id, {"debe": 0, "haber": 0})
+                debe = saldos["debe"]
+                haber = saldos["haber"]
+                total_debe_clase += debe
+                total_haber_clase += haber
 
-                debe = mov.get("total_debe") or 0
-                haber = mov.get("total_haber") or 0
-                saldo = (debe - haber) * naturaleza
-
-                cuentas_data.append({
-                    "codigo": cuenta.codigo,
-                    "nombre": cuenta.nombre,
-                    "total_debe": debe,
-                    "total_haber": haber,
-                    "saldo": saldo,
-                    "hijos": [],
-                    "ids": [cuenta.id],
-                })
+                # Incluimos cuentas aunque estén en cero si se prefiere, o filtramos
+                if debe != 0 or haber != 0:
+                    cuentas_data.append({
+                        "codigo": getattr(cuenta, "codigo", None),
+                        "nombre": getattr(cuenta, "nombre", ""),
+                        "total_debe": debe,
+                        "total_haber": haber,
+                        "saldo": (debe - haber) * naturaleza,
+                        "hijos": [],
+                    })
 
             hijos_data = []
             for hijo in clase.hijos.all():
-                hijo_data = calcular_saldo(hijo)
-                hijos_data.append(hijo_data)
-                cuentas_ids.extend(hijo_data["ids"])
+                hijo_data = calcular_saldo_optimizado(hijo, saldos_map)
+                total_debe_clase += hijo_data["total_debe"]
+                total_haber_clase += hijo_data["total_haber"]
+                # Mostrar hijos si tienen saldo
+                if hijo_data["total_debe"] != 0 or hijo_data["total_haber"] != 0:
+                    hijos_data.append(hijo_data)
 
-            mov_total = Movimiento.objects.filter(
-                cuenta_id__in=cuentas_ids,
-                asiento_contable__created_at__gte=fecha_inicio_dt,
-                asiento_contable__created_at__lt=fecha_fin_dt,
-            ).aggregate(total_debe=Sum("debe"), total_haber=Sum("haber"))
-
-            total_debe = mov_total.get("total_debe") or 0
-            total_haber = mov_total.get("total_haber") or 0
-            saldo_total = (total_debe - total_haber) * naturaleza
+            saldo_total = (total_debe_clase - total_haber_clase) * naturaleza
 
             return {
                 "codigo": clase.codigo,
                 "nombre": clase.nombre,
-                "total_debe": total_debe,
-                "total_haber": total_haber,
+                "total_debe": total_debe_clase,
+                "total_haber": total_haber_clase,
                 "saldo": saldo_total,
                 "hijos": cuentas_data + hijos_data,
-                "ids": cuentas_ids,
+                "ids": [], # No lo necesitamos en el PDF
             }
 
-        data = [calcular_saldo(c) for c in clases]
+        # 4. Calcular lógica de negocio
+        total_ingresos = 0
+        total_gastos = 0
+        data_balance = [] # Lista final solo con 1, 2 y 3
+        nodo_patrimonio = None
 
+        for clase in clases_raiz:
+            nodo = calcular_saldo_optimizado(clase, saldos_por_cuenta)
+            
+            if clase.codigo == 4: # Ingresos
+                total_ingresos = nodo["saldo"]
+            elif clase.codigo == 5: # Gastos
+                total_gastos = nodo["saldo"]
+            elif clase.codigo in [1, 2, 3]: # Activo, Pasivo, Patrimonio
+                data_balance.append(nodo)
+                if clase.codigo == 3:
+                    nodo_patrimonio = nodo
+
+        # 5. Aplicar resultado del ejercicio al Patrimonio
+        resultado_ejercicio = total_ingresos - total_gastos
+        if nodo_patrimonio:
+            nodo_patrimonio["saldo"] += resultado_ejercicio
+
+        # 6. Calcular totales finales para el template
         totales = {
-            "debe": sum(i["total_debe"] for i in data),
-            "haber": sum(i["total_haber"] for i in data),
-            "saldo": sum(i["saldo"] for i in data),
+            "debe": sum(i["total_debe"] for i in data_balance),
+            "haber": sum(i["total_haber"] for i in data_balance),
+            "saldo": sum(i["saldo"] for i in data_balance),
         }
 
         context = {
             "fecha_inicio": fecha_inicio,
             "fecha_fin": fecha_fin,
-            "data": data,
+            "data": data_balance,
             "totales": totales,
         }
 
