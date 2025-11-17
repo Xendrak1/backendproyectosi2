@@ -164,14 +164,14 @@ LIBELULA_URL = config( 'LIBELULA_URL', default='https://api.libelula.bo')
 DJANGO_PUBLIC_URL = config('DJANGO_PUBLIC_URL', default='http://127.0.0.1:8000')
 
 
-
+'''
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / "db.sqlite3",
     }
 }
-
+'''
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
